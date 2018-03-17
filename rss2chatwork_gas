@@ -1,0 +1,122 @@
+/*
+ * noteのRSSをXMLに変換し、スプレットシートへ書き込み後、Chatworkへ通知します。
+ * note : https://note.mu/
+ *
+ * 「関数を選択」には「rss」を選択してください。
+ */
+
+/*
+ * 初期設定
+ *
+ * FEED_URL = 取得するnoteのRSSのURLを指定してください
+ * SS_ID = スプレットシートのIDを指定してください
+ * SS_NAME = 書き込みするスプレットシートのシート名を指定してください
+ * CHATWORK_API = チャットワークAPIのIDを指定してください
+ * CHATWORK_ROOM_ID = 通知するチャットワークのルームIDを指定してください
+ */
+function config(key) {
+  return {
+    FEED_URL : 'https://note.mu/xxx/xxx/rss',
+    SS_ID : 'spreadsheets_id',
+    SS_NAME : 'spreadsheets_name',
+    CHATWORK_API : 'chatwork_api',
+    CHATWORK_ROOM_ID : 1234567890
+  }[key]
+}
+
+/*
+ * ================================================
+ *　functions
+ * ================================================
+ */
+function rss(){
+  FEED_URL = config('FEED_URL');
+  SS_ID = config('SS_ID');
+  SS_NAME = config('SS_NAME');
+  CHATWORK_API = config('CHATWORK_API');
+  CHATWORK_ROOM_ID = config('CHATWORK_ROOM_ID');
+
+  var ss = SpreadsheetApp.openById(SS_ID);
+  var sh = ss.getSheetByName(SS_NAME);
+  var entries = getEntries(FEED_URL); // RSSデータ取得
+
+  // 最新の記事を一番上にして書き込む（古い記事から書き込む）ため、取得した配列を逆に並び替え
+  entries = entries.reverse();
+
+  entries.forEach(function(data, index, array) {
+    var title = data.getChildText('title');  // RSS記事タイトルを取得
+    var url = data.getChildText('link'); // RSS記事URL取得
+    var description = data.getChildText('description'); // RSS記事description取得
+
+    // 記事タイトルが既に存在しているか検索
+    var isSearch = searchTitle(sh,　title, 1);
+
+    // 存在していなかったら行を追加して書き込み
+    if (!isSearch) {
+      // 2行目に行を追加
+      sh.insertRowAfter(1);
+
+      // 最新の記事を2行目に書き込み
+      writeSs(sh, title, url, description);
+
+      // Chatworkに送信
+      sendChatwork(CHATWORK_API, CHATWORK_ROOM_ID, title, url);
+    }
+  });
+}
+
+/*
+ * RSSから記事データを取得
+ */
+function getEntries(FEED_URL) {
+  var response = UrlFetchApp.fetch(FEED_URL); // HTTPリクエスト
+  var xml = XmlService.parse(response.getContentText());　// HTTPリクエストで取得したデータをXML形式へ変換
+  var data = xml.getRootElement().getChildren('channel')[0].getChildren('item'); //　XMLのitem配下のデータを取得
+
+  return data;
+}
+
+/*
+ * 記事タイトルが既に存在しているか検索
+ */
+function searchTitle(sh,title,col){
+  var shData = sh.getDataRange().getValues(); // シートデータを二次元配列に変換
+
+  for(var i = 1; i < shData.length; i++) {
+    if(shData[i][col-1] === title) {
+      return true; // あり
+    }
+  }
+
+  return false; // なし
+}
+
+/*
+ * スプレットシートへ書き込み
+ */
+function writeSs(sh, title, url, description) {
+  // 最新の記事を2行目に書き込み
+  sh.getRange((2), 1).setValue(title); // 記事タイトル
+  sh.getRange((2), 2).setValue(url); // 記事URL
+  sh.getRange((2), 3).setValue(description); // 記事description
+}
+
+/*
+ * Chatworkへ通知
+ */
+function sendChatwork(CHATWORK_API, CHATWORK_ROOM_ID, title, url) {
+  var client = ChatWorkClient.factory({token: CHATWORK_API});　//　チャットワークAPI
+
+  // 通知本文
+  var body = '';
+  body += '[info][title]';
+  body += title;
+  body += '[/title]';
+  body += url;
+  body += '[/info]';
+
+  client.sendMessage({
+    room_id: CHATWORK_ROOM_ID, //　ルームID
+    body: (body)
+  });
+}
